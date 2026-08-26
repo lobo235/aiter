@@ -78,7 +78,7 @@ Some features (e.g., scheduling hints like `sched_barrier`) require the [AMD Glu
 | Output | bf16 or fp16 |
 | Scales | per-row (A), per-column (B), float32 |
 | Tunable | BLOCK_SIZE_M/N/K, GROUP_SIZE_M, NUM_XCDS, NUM_WARPS |
-| Config | `$AITER_TRITON_CONFIGS_PATH/gemm/gluon/gfx950-GEMM-A8W8.json` |
+| Config | `$AITER_TRITON_CONFIGS_PATH/gfx950/gluon/gemm/gemm_a8w8/DEFAULT.json` |
 
 ---
 
@@ -122,7 +122,7 @@ make the wind-down a no-op for small-K shapes so only the Final iter runs.
 
 | Parameter | Details |
 |-----------|---------|
-| Arch | gfx950 (CDNA4) only |
+| Arch | gfx950 (CDNA4), gfx1250 |
 | A / B dtype | fp8_e4m3 |
 | Output | bf16 (default), fp16 |
 | Scales | fp32 |
@@ -131,7 +131,7 @@ make the wind-down a no-op for small-K shapes so only the Final iter runs.
 | Baked-in | `BLOCK_SIZE_K = 128`, `NUM_WARPS = 4`, MFMA `16&times;16&times;128` |
 | SplitK | `NUM_KSPLIT` (separate reduce kernel `_gemm_a8w8_blockscale_reduce_kernel`) |
 | Tunable | `BLOCK_SIZE_M`, `BLOCK_SIZE_N`, `GROUP_SIZE_M`, `NUM_KSPLIT`, `NUM_STAGES`, `NUM_XCDS` |
-| Config | `$AITER_TRITON_CONFIGS_PATH/gemm/gluon/gfx950-GEMM-A8W8_BLOCKSCALE[-N=*-K=*].json` |
+| Config | `$AITER_TRITON_CONFIGS_PATH/<arch>/gluon/gemm/gemm_a8w8_blockscale/{DEFAULT,GEMM-A8W8_BLOCKSCALE-N=*-K=*}.json` |
 
 **Perf** (MI350, `-gluon` flag selects this kernel; vs. the in-tree Triton kernel):
 
