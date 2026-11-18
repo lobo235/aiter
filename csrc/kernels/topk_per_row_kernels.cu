@@ -1252,50 +1252,70 @@ __device__ void filter_and_histogram(T const* in_buf,
     }
 }
 
-// Inclusive scan over the histogram using hipcub::BlockScan.
+// hipcub types and LDS scratch of scan(). Named so a kernel can place the
+// scratch in a union with storage that is dead while the scan runs.
+template <typename IdxT,
+          int BitsPerPass,
+          int BlockSize,
+          bool Wide = (calc_num_buckets<BitsPerPass>() >= BlockSize)>
+struct ScanTypes;
+
 template <typename IdxT, int BitsPerPass, int BlockSize>
-__device__ void scan(IdxT volatile* histogram)
+struct ScanTypes<IdxT, BitsPerPass, BlockSize, true>
 {
-    constexpr int num_buckets = calc_num_buckets<BitsPerPass>();
+    static constexpr int num_buckets = calc_num_buckets<BitsPerPass>();
+    static_assert(num_buckets % BlockSize == 0);
+    static constexpr int items_per_thread = num_buckets / BlockSize;
+    using BlockLoad =
+        hipcub::BlockLoad<IdxT, BlockSize, items_per_thread, hipcub::BLOCK_LOAD_TRANSPOSE>;
+    using BlockStore =
+        hipcub::BlockStore<IdxT, BlockSize, items_per_thread, hipcub::BLOCK_STORE_TRANSPOSE>;
+    using BlockScan = hipcub::BlockScan<IdxT, BlockSize>;
+    union TempStorage
+    {
+        typename BlockLoad::TempStorage load;
+        typename BlockScan::TempStorage scan;
+        typename BlockStore::TempStorage store;
+    };
+};
+
+template <typename IdxT, int BitsPerPass, int BlockSize>
+struct ScanTypes<IdxT, BitsPerPass, BlockSize, false>
+{
+    static constexpr int num_buckets = calc_num_buckets<BitsPerPass>();
+    using BlockScan                  = hipcub::BlockScan<IdxT, BlockSize>;
+    using TempStorage                = typename BlockScan::TempStorage;
+};
+
+// Inclusive scan over the histogram using hipcub::BlockScan, with
+// caller-provided LDS scratch.
+template <typename IdxT, int BitsPerPass, int BlockSize>
+__device__ void scan(IdxT volatile* histogram,
+                     typename ScanTypes<IdxT, BitsPerPass, BlockSize>::TempStorage& temp_storage)
+{
+    using Types                = ScanTypes<IdxT, BitsPerPass, BlockSize>;
+    constexpr int num_buckets  = Types::num_buckets;
     if constexpr(num_buckets >= BlockSize)
     {
-        static_assert(num_buckets % BlockSize == 0);
-        constexpr int items_per_thread = num_buckets / BlockSize;
-        typedef hipcub::BlockLoad<IdxT, BlockSize, items_per_thread, hipcub::BLOCK_LOAD_TRANSPOSE>
-            BlockLoad;
-        typedef hipcub::BlockStore<IdxT, BlockSize, items_per_thread, hipcub::BLOCK_STORE_TRANSPOSE>
-            BlockStore;
-        typedef hipcub::BlockScan<IdxT, BlockSize> BlockScan;
+        IdxT thread_data[Types::items_per_thread];
 
-        __shared__ union
-        {
-            typename BlockLoad::TempStorage load;
-            typename BlockScan::TempStorage scan;
-            typename BlockStore::TempStorage store;
-        } temp_storage;
-
-        IdxT thread_data[items_per_thread];
-
-        BlockLoad(temp_storage.load).Load(histogram, thread_data);
+        typename Types::BlockLoad(temp_storage.load).Load(histogram, thread_data);
         __syncthreads();
 
-        BlockScan(temp_storage.scan).InclusiveSum(thread_data, thread_data);
+        typename Types::BlockScan(temp_storage.scan).InclusiveSum(thread_data, thread_data);
         __syncthreads();
 
-        BlockStore(temp_storage.store).Store(histogram, thread_data);
+        typename Types::BlockStore(temp_storage.store).Store(histogram, thread_data);
     }
     else
     {
-        typedef hipcub::BlockScan<IdxT, BlockSize> BlockScan;
-        __shared__ typename BlockScan::TempStorage temp_storage;
-
         IdxT thread_data = 0;
         if(threadIdx.x < num_buckets)
         {
             thread_data = histogram[threadIdx.x];
         }
 
-        BlockScan(temp_storage).InclusiveSum(thread_data, thread_data);
+        typename Types::BlockScan(temp_storage).InclusiveSum(thread_data, thread_data);
         __syncthreads();
 
         if(threadIdx.x < num_buckets)
@@ -1303,6 +1323,14 @@ __device__ void scan(IdxT volatile* histogram)
             histogram[threadIdx.x] = thread_data;
         }
     }
+}
+
+// Inclusive scan over the histogram using hipcub::BlockScan.
+template <typename IdxT, int BitsPerPass, int BlockSize>
+__device__ void scan(IdxT volatile* histogram)
+{
+    __shared__ typename ScanTypes<IdxT, BitsPerPass, BlockSize>::TempStorage temp_storage;
+    scan<IdxT, BitsPerPass, BlockSize>(histogram, temp_storage);
 }
 
 // Find the bucket where cumulative count crosses k and update counter.
@@ -4459,14 +4487,20 @@ __global__ void radix_topk_one_block_kernel(T const* in,
     __shared__ Counter<T, IdxT> counter;
     // Histogram is dead before the stable final emit. Reuse its LDS for scan
     // and sort temporary storage instead of increasing per-block LDS pressure.
+    // The histogram scan's scratch is dead during the final emit too, so it
+    // shares the union; at 12 bits on wave32 a separate copy overflowed 64 KiB.
     __shared__ union
     {
-        IdxT histogram[num_buckets];
+        struct
+        {
+            IdxT histogram[num_buckets];
+            typename ScanTypes<IdxT, BitsPerPass, BlockSize>::TempStorage histogram_scan;
+        } live;
         typename StableScanT::TempStorage stable_scan;
         typename StableSort1T::TempStorage stable_sort_1;
         typename StableSort2T::TempStorage stable_sort_2;
     } scratch;
-    IdxT* histogram = scratch.histogram;
+    IdxT* histogram = scratch.live.histogram;
 
     const int64_t batch_id = blockIdx.x;
 
@@ -4615,7 +4649,7 @@ __global__ void radix_topk_one_block_kernel(T const* in,
                 k);
         __syncthreads();
 
-        scan<IdxT, BitsPerPass, BlockSize>(histogram);
+        scan<IdxT, BitsPerPass, BlockSize>(histogram, scratch.live.histogram_scan);
         __syncthreads();
 
         choose_bucket<T, IdxT, BitsPerPass>(&counter,
