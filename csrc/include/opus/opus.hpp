@@ -1777,12 +1777,12 @@ OPUS_D void llvm_amdgcn_raw_buffer_load_lds(i32x4_t r, OPUS_LDS_ADDR unsigned in
 #else
 #define OPUS_HAS_BUFFER_ATOMIC_FADD_F32 0
 #endif
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define OPUS_HAS_BUFFER_ATOMIC_PK_ADD_F16 1
 #else
 #define OPUS_HAS_BUFFER_ATOMIC_PK_ADD_F16 0
 #endif
-#if defined(__gfx950__) || defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if defined(__gfx950__) || defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define OPUS_HAS_BUFFER_ATOMIC_PK_ADD_BF16 1
 #else
 #define OPUS_HAS_BUFFER_ATOMIC_PK_ADD_BF16 0

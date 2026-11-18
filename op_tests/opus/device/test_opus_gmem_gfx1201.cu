@@ -72,6 +72,20 @@ __global__ void opus_gmem_gfx1201_kernel(
 }
 
 template __global__ void opus_gmem_gfx1201_kernel<256, 4>(const float*, const float*, float*, int);
+
+// Packed buffer atomic add (f16x2 / bf16x2): every thread adds 1.0 to both
+// halves of slot (thread id % n_slots). Exercises the native
+// buffer_atomic_pk_add_{f16,bf16} path when opus.hpp enables it for gfx12.
+template<typename S, typename S2>
+__device__ void atomic_pk_add_body(void* out, int n_slots)
+{
+    auto g  = opus::make_gmem(static_cast<S*>(out));
+    int tid = __builtin_amdgcn_workgroup_id_x() * 256 + __builtin_amdgcn_workitem_id_x();
+    S2 one  = {static_cast<S>(1.0f), static_cast<S>(1.0f)};
+    g.template atomic_add<2>(one, (tid % n_slots) * 2);
+}
+__global__ void opus_atomic_pk_add_f16_gfx1201_kernel(void* out, int n_slots)  { atomic_pk_add_body<opus::fp16_t, opus::fp16x2_t>(out, n_slots); }
+__global__ void opus_atomic_pk_add_bf16_gfx1201_kernel(void* out, int n_slots) { atomic_pk_add_body<opus::bf16_t, opus::bf16x2_t>(out, n_slots); }
 #endif // __gfx1201__ / __gfx1200__
 
 #else
@@ -89,6 +103,9 @@ template __global__ void opus_gmem_gfx1201_kernel<256, 4>(const float*, const fl
 
 template<int BLOCK_SIZE, int VECTOR_SIZE>
 __global__ void opus_gmem_gfx1201_kernel(const float*, const float*, float*, int) {}
+
+__global__ void opus_atomic_pk_add_f16_gfx1201_kernel(void*, int) {}
+__global__ void opus_atomic_pk_add_bf16_gfx1201_kernel(void*, int) {}
 
 extern "C" void run_opus_gmem_gfx1201(
     const void* d_a,
@@ -108,6 +125,17 @@ extern "C" void run_opus_gmem_gfx1201(
         (opus_gmem_gfx1201_kernel<BLOCK_SIZE, VECTOR_SIZE>),
         dim3(blocks), dim3(BLOCK_SIZE), 0, 0,
         a, b, r, n);
+    HIP_CALL(hipGetLastError());
+    HIP_CALL(hipDeviceSynchronize());
+}
+
+extern "C" void run_opus_atomic_pk_add_gfx1201(void* d_out, int n_slots, int n_threads, int is_bf16)
+{
+    int blocks = n_threads / 256;
+    if (is_bf16)
+        hipLaunchKernelGGL(opus_atomic_pk_add_bf16_gfx1201_kernel, dim3(blocks), dim3(256), 0, 0, d_out, n_slots);
+    else
+        hipLaunchKernelGGL(opus_atomic_pk_add_f16_gfx1201_kernel, dim3(blocks), dim3(256), 0, 0, d_out, n_slots);
     HIP_CALL(hipGetLastError());
     HIP_CALL(hipDeviceSynchronize());
 }

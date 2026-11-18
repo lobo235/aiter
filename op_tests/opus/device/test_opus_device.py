@@ -183,6 +183,12 @@ class OpusDeviceLib:
         fn.argtypes = [_VP, _VP, _VP, _I]
         fn(self._ptr(A), self._ptr(B), self._ptr(Result), int(A.numel()))
 
+    def run_opus_atomic_pk_add_gfx1201(self, Out, n_slots, n_threads, is_bf16):
+        fn = self._lib.run_opus_atomic_pk_add_gfx1201
+        fn.restype = None
+        fn.argtypes = [_VP, _I, _I, _I]
+        fn(self._ptr(Out), int(n_slots), int(n_threads), int(is_bf16))
+
     # -- wmma_gfx1201 (8 wave32 16x16x16 variants via __builtin_amdgcn_wmma_*_w32_gfx12) --
     def _run_wmma_gfx1201(self, suffix, A, B, C):
         fn = getattr(self._lib, f"run_wmma_gfx1201_{suffix}")
@@ -1328,6 +1334,32 @@ def test_opus_gmem_gfx1201(mod):
         return 1
     print(f"  PASS: opus_gmem_gfx1201 (arch={arch}, n={n}), max_diff={max_diff:.6e}")
     return 0
+
+
+def test_opus_atomic_pk_add_gfx1201(mod):
+    """Packed f16x2 / bf16x2 buffer atomic add on gfx1201: 64 threads hit each
+    slot, each adding 1.0 to both halves, so every half must read exactly 64.
+    Skips on other archs (kernel body is gfx1201-only)."""
+    arch = _get_gpu_arch()
+    if arch not in _OPUS_PARSE_GFX1201_ARCHS:
+        print(f"  SKIP: opus_atomic_pk_add_gfx1201 (arch={arch}, gfx1201-only test)")
+        return 0
+    n_slots, n_threads = 1024, 64 * 1024
+    failures = 0
+    for dtype, is_bf16 in ((torch.float16, 0), (torch.bfloat16, 1)):
+        Out = torch.zeros(2 * n_slots, device="cuda", dtype=dtype)
+        mod.run_opus_atomic_pk_add_gfx1201(Out, n_slots, n_threads, is_bf16)
+        torch.cuda.synchronize()
+        want = float(n_threads // n_slots)
+        bad = (Out.float() != want).sum().item()
+        if bad:
+            print(f"  FAIL: opus_atomic_pk_add_gfx1201 {dtype}: {bad} halves != {want}")
+            failures += 1
+        else:
+            print(
+                f"  PASS: opus_atomic_pk_add_gfx1201 {dtype} (arch={arch}, all {2 * n_slots} halves == {want})"
+            )
+    return failures
 
 
 # WMMA tests for gfx1200/gfx1201 (Navi 44/48, RDNA4). Both archs share the
@@ -2741,6 +2773,7 @@ def main():
     failures += test_mma_step_k_bf16(mod)
     failures += test_vector_add(mod)
     failures += test_opus_gmem_gfx1201(mod)
+    failures += test_opus_atomic_pk_add_gfx1201(mod)
     failures += test_wmma_gfx1201_f32_f16(mod)
     failures += test_wmma_gfx1201_f32_bf16(mod)
     failures += test_wmma_gfx1201_f16_f16(mod)
