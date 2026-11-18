@@ -110,6 +110,10 @@ def perftest(
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
             avg = get_trace_perf(prof, num_iters, warm_iter=profile_warm_iters)
+            if not _has_device_events(prof):
+                avg = _time_with_events(
+                    lambda: run_iters_rotate(num_iters, func, rotate_args), num_iters
+                )
 
             if testGraph:
                 graph = torch.cuda.CUDAGraph()
@@ -123,6 +127,10 @@ def perftest(
                 ) as prof:
                     run_iters(1, graph.replay)
                 avg = get_trace_perf(prof, num_iters, warm_iter=profile_warm_iters)
+                if not _has_device_events(prof):
+                    avg = _time_with_events(
+                        lambda: run_iters(1, graph.replay), num_iters
+                    )
                 logger.info(f"avg: {avg} us/iter with hipgraph")
 
             if os.environ.get("AITER_SMI_MONITOR", "0") == "1":
@@ -221,6 +229,31 @@ def device_memory_profiling(func, *args, **kwargs):
     iter_used_memory = torch_peak_increase + non_torch_increase + inputSize
 
     return iter_used_memory, inputSize, torch_peak_increase, non_torch_increase
+
+
+def _has_device_events(prof):
+    """True when the profiler saw at least one GPU kernel."""
+    return any(str(e.device_type).endswith("CUDA") for e in prof.events())
+
+
+def _time_with_events(run, num_iters):
+    """Average us per iteration of `run` (which does num_iters iterations), timed with HIP events.
+
+    Used when the torch profiler records no GPU kernels (seen with some ROCm builds of torch):
+    without it every time reads 0. Event time includes launch gaps between kernels, so for
+    launch-bound ops it reads higher than the profiler's kernel-time sum would.
+    """
+    logger.warning(
+        "torch profiler recorded no GPU kernels; timing with HIP events instead"
+    )
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize()
+    start.record()
+    run()
+    end.record()
+    end.synchronize()
+    return start.elapsed_time(end) * 1000 / num_iters
 
 
 def run_iters(num_iters, func, *args, **kwargs):
