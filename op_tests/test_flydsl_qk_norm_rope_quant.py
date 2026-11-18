@@ -37,10 +37,10 @@ from aiter.test_common import benchmark, checkAllclose, run_perftest
 
 torch.set_default_device("cuda")
 
-# The public wrapper dispatches wave64 (gfx942/gfx950) vs wave32 (gfx1250)
+# The public wrapper dispatches wave64 (gfx942/gfx950) vs wave32 (gfx12xx)
 # internally, so one test covers every card. Positive allow-list: an unknown
 # new card must not silently run an unbuilt kernel.
-SUPPORTED_GFX = ["gfx942", "gfx950", "gfx1250"]
+SUPPORTED_GFX = ["gfx942", "gfx950", "gfx1201", "gfx1250"]
 
 # Shared constants (independent of attention shape).
 _EPS = 1e-6
@@ -193,6 +193,7 @@ def _dequant(out_fp8, scale, *, D, quant_group_size, scale_dtype):
 _PEAK_BW_GBPS_BY_GFX = {
     "gfx942": 5300.0,  # MI300X (MI325X is 6000)
     "gfx950": 8000.0,  # MI355X HBM3E
+    "gfx1201": 640.0,  # R9700 / RX 9070 XT GDDR6
     "gfx1250": 22000.0,
 }
 

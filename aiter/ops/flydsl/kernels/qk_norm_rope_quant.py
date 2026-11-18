@@ -1446,6 +1446,8 @@ def flydsl_qk_norm_rope_quant(
     from aiter.jit.utils.chip_info import get_gfx as _get_gfx
 
     is_gfx1250 = _get_gfx() in ("gfx1250", "gfx1250-strict")
+    # Wave32 parts take the w32 builder; TDM (tensor data mover) is gfx1250-only.
+    is_wave32 = is_gfx1250 or _get_gfx() in ("gfx1200", "gfx1201")
 
     H = num_q_heads
     T_tok = q.shape[0]
@@ -1589,10 +1591,11 @@ def flydsl_qk_norm_rope_quant(
     def _stream_arg():
         return stream if has_direct else Stream(stream)
 
-    if is_gfx1250:
+    if is_wave32:
         tdm_quant = quant
         use_tdm = (
-            USE_TDM_PREFILL
+            is_gfx1250
+            and USE_TDM_PREFILL
             and (not quant or T_tok * H >= 65536)
             and T_tok * H >= TDM_MIN_ROWS
             and (D % 256 == 0)
@@ -1692,7 +1695,7 @@ def flydsl_qk_norm_rope_quant(
     if stream is None:
         stream = torch.cuda.current_stream()
 
-    if is_gfx1250:
+    if is_wave32:
         q_weight_static = _cached_from_dlpack(q_weight_arg)
         kv_weight_static = _cached_from_dlpack(kv_weight)
         cos_static = _cached_from_dlpack(cos_2d)
