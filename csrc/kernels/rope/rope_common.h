@@ -7401,9 +7401,15 @@ struct alignas(sizeof(T) * vec_size) vec_t
             for(int i = 0; i < vec_size; ++i)
                 data[i] = src[i];
         }
-#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx942__) || defined(__gfx950__))
+#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx942__) || defined(__gfx950__) || \
+                                          defined(__gfx1200__) || defined(__gfx1201__))
+#if defined(__gfx1200__) || defined(__gfx1201__)
+        // RDNA4's packed convert emits OCP e4m3fn only; fnuz keeps the scalar path.
+        else if constexpr(std::is_same_v<T, fp8e4m3fn> && (vec_size % 2 == 0))
+#else
         else if constexpr((std::is_same_v<T, fp8e4m3fnuz> || std::is_same_v<T, fp8e4m3fn>) &&
                           (vec_size % 2 == 0))
+#endif
         {
             const float inverted_scale = 1.0f / scale;
 #pragma unroll
