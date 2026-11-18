@@ -259,6 +259,10 @@ def test_op(
             pytest.skip("float8_e4m3fnuz is the gfx942 FP8 encoding")
         if fused_quant:
             pytest.skip("fused FP8 output quant writes OCP e4m3fn, not fnuz")
+    elif get_arch() in ("gfx1200", "gfx1201"):
+        # RDNA4 has OCP e4m3fn natively; the microscaled (mx) paths are CDNA4 only.
+        if act_dtype_str.startswith("mx") or weight_dtype_str.startswith("mx"):
+            pytest.skip("float8 x mx only supported on CDNA4")
     elif get_arch() != "gfx950":
         pytest.skip("float8 x mx only supported on CDNA4")
 
