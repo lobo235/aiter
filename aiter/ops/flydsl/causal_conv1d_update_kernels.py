@@ -72,7 +72,7 @@ _SGLANG_WIDTHS = range(2, 5)
 #: Targets the kernels are built for and the test suite runs on. An exact list
 #: rather than a ``gfx9`` prefix: the older gfx9 parts are never exercised, so
 #: admitting them would dispatch where nothing has been validated.
-_SUPPORTED_ARCHS = ("gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx942", "gfx950", "gfx1200", "gfx1201")
 
 #: Narrowest channel tile.
 _WAVEFRONT = 64

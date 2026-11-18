@@ -44,10 +44,10 @@ from op_tests.triton_tests.utils.causal_conv1d_update_refs import (
 DEVICE = "cuda"
 DTYPE = torch.bfloat16
 
-SUPPORTED_GFX = ("gfx942", "gfx950")
+SUPPORTED_GFX = ("gfx942", "gfx950", "gfx1200", "gfx1201")
 pytestmark = pytest.mark.skipif(
     get_gfx() not in SUPPORTED_GFX,
-    reason="FlyDSL causal_conv1d update requires gfx942 or gfx950",
+    reason="FlyDSL causal_conv1d update requires gfx942, gfx950, gfx1200 or gfx1201",
 )
 
 _DTYPE_EPS = {torch.bfloat16: 2.0**-8, torch.float16: 2.0**-11}
