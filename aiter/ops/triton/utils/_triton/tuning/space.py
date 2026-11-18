@@ -215,9 +215,8 @@ def exceeds_registers(config, spec, arch):
     tile = cta_tile(config, spec)
     if tile is None or "num_warps" not in config:
         return False
-    wave_size = (
-        32 if arch.startswith("gfx1250") else 64
-    )  # gfx1250 run wave32, gfx9xx wave64
+    # RDNA (gfx10/11/12, gfx1250 included) runs wave32; CDNA (gfx9xx) runs wave64.
+    wave_size = 32 if arch.startswith(("gfx10", "gfx11", "gfx12")) else 64
     acc_per_thread = tile[0] * tile[1] / (config["num_warps"] * wave_size)
     return acc_per_thread > MAX_ACC_PER_THREAD.get(arch, 256)
 
